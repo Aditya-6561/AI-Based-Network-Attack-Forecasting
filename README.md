@@ -1,297 +1,249 @@
-# TRINETRA — AI-Based Network Attack Forecasting from Network Traffic Data
+# AI-Based Network Attack Forecasting
 
-**Problem Statement 26153.** A temporal *world model* that learns the transition
-dynamics of network state, `P(S_{t+1} | S_t)`, and rolls them forward to forecast
-attacker progression **before** the kill chain completes — rather than classifying
-each flow in isolation.
+A research prototype for forecasting the progression of network attacks from time-ordered traffic telemetry. Instead of making a decision about each flow in isolation, the system models how network conditions evolve and predicts whether hostile activity may appear in the next several time windows.
 
-Fully open-source. Runs entirely offline; no cloud APIs.
+> **Problem Statement:** SIH 2026 — PS26153  
+> **Project note:** This repository adapts an existing open-source implementation. See the [upstream project repository](https://github.com/Nikethan10/trinetra-sih2026-ps26153) for the original implementation, and retain any applicable license and attribution notices.
 
----
-
-## 1. What this is (and is not)
-
-A conventional IDS maps one flow to one benign/malicious label, discarding the
-temporal structure of an intrusion. TRINETRA instead:
-
-1. Aggregates raw telemetry into a **42-dimensional network state vector** `S_t`
-   per 10-second window (flow-level *and* packet-level attributes).
-2. Encodes an observed history `S_{t-11..t}` (120 s) into a latent state `z_t`.
-3. **Advances the latent state autoregressively** through a learned transition
-   cell `T(·)` for `K = 6` steps (60 s). Ground-truth future states are never fed
-   back — at step *k* the model conditions only on its own prediction `z_{t+k-1}`.
-4. Decodes each rolled-out latent into a predicted observable state, an
-   infiltration probability, and a **MITRE ATT&CK stage**.
-5. Attributes every forecast back onto specific traffic features via **Integrated
-   Gradients**.
-
-The transition cell is what makes this a world model: at inference the system
-simulates a future that has not been observed.
+The pipeline is designed to run locally and does not require cloud APIs.
 
 ---
 
-## 2. Setup
+## Overview
+
+Traditional intrusion-detection systems often classify traffic one flow at a time. That can overlook the sequence of events leading up to an attack. This project explores a temporal approach:
+
+1. Convert traffic telemetry into a **42-feature network-state vector** for each 10-second interval.
+2. Encode the latest 12 windows (a 120-second history) into a compact latent representation.
+3. Roll the representation forward for six prediction steps, covering the next 60 seconds. Each step uses the model's own previous prediction rather than the ground-truth future state.
+4. Decode the forecast into an estimated future state, attack risk, and a MITRE ATT&CK tactic-stage prediction.
+5. Use **Integrated Gradients** to help identify which traffic features contributed to a forecast.
+
+The learned transition module is the core forecasting component: during inference, it simulates possible future network states that have not yet been observed.
+
+---
+
+## Requirements and setup
+
+### 1. Install dependencies
+
+From the project directory, run:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Download the CSE-CIC-IDS2018 `TrafficForML_CICFlowMeter` CSVs (9 files) and point
-the pipeline at them:
+### 2. Prepare the dataset
+
+Download the nine CSV files from the **CSE-CIC-IDS2018 `TrafficForML_CICFlowMeter`** dataset. Set an environment variable to the directory containing those files.
+
+Linux/macOS:
 
 ```bash
-export TRINETRA_DATA_DIR=/path/to/ids2018      # Windows: set TRINETRA_DATA_DIR=...
+export TRINETRA_DATA_DIR=/path/to/ids2018
 ```
 
-### Train and benchmark
+Windows Command Prompt:
+
+```bat
+set TRINETRA_DATA_DIR=C:\path\to\ids2018
+```
+
+### 3. Train and evaluate
 
 ```bash
 python training/train.py --max-rows 600000 --stride 1 --epochs 30
 ```
 
-Writes `models/world_model.pt` and `models/benchmark_results.json`. Deterministic
-(`seed = 1337`). Runs on CPU in roughly 10–20 minutes; CUDA is used automatically
-when available.
+The training script writes the model to `models/world_model.pt` and evaluation output to `models/benchmark_results.json`. The configured random seed is `1337`. Training is intended to run on CPU and uses CUDA automatically when available.
 
-### Launch the dashboard
+### 4. Start the dashboard
 
 ```bash
 streamlit run app.py
 ```
 
-### Loading large captures — point at the folder, don't upload
+### Working with large capture files
 
-The IDS2018 CSVs are 200–380 MB each. **Set `TRINETRA_DATA_DIR` instead of using the
-uploader.** This reads straight from disk, has no size limit, and is the intended
-path:
+The IDS2018 CSV files can be hundreds of megabytes each. For large datasets, configure `TRINETRA_DATA_DIR` instead of uploading files through the dashboard:
 
 ```bash
 export TRINETRA_DATA_DIR=/path/to/ids2018
 streamlit run app.py
 ```
 
-On Windows (cmd):
+On Windows Command Prompt:
 
-```bash
+```bat
 set TRINETRA_DATA_DIR=C:\Users\you\trinetra-data\ids2018 && streamlit run app.py
 ```
 
-Every `.csv`, `.pcap` and `.pcapng` in that folder then appears in the sidebar
-dropdown. Nothing is copied and nothing is uploaded.
+CSV, PCAP, and PCAPNG files in that directory can then be selected from the sidebar. The directory-based workflow reads the files in place rather than copying or uploading them.
 
-Memory is bounded by the **"Max records to ingest"** slider, not by file size:
-reading 600,000 rows from a 383 MB CSV takes about 9 s and peaks near 1 GB of RAM,
-because only the 38 columns the state builder needs are parsed and the reader stops
-at the row cap. A 383 MB file and a 105 MB file cost the same at the same row count.
+Memory use is primarily controlled by the dashboard's **Max records to ingest** setting. The reader parses only the 38 columns needed by the state builder and stops at the configured row limit. The project documentation reports that reading 600,000 rows from a 383 MB CSV takes about nine seconds and peaks near 1 GB of RAM; actual performance depends on the machine and storage.
 
-Drag-and-drop upload still works for a one-off file a reviewer brings along, and
-`.streamlit/config.toml` raises Streamlit's 200 MB default cap to 1 GB. Uploads are
-buffered in memory, so the folder route is better for anything large.
+Uploads remain available for small, one-off files. The Streamlit configuration raises the default upload limit to 1 GB, but uploads are buffered in memory, so the directory workflow is preferable for large captures.
 
-`data/demo_capture.pcap` is a small synthetic capture (benign web traffic, a
-horizontal port scan, retransmissions and IP fragments) included so the PCAP path
-can be demonstrated without a large capture file.
+A small synthetic capture, `data/demo_capture.pcap`, is included to demonstrate the PCAP ingestion path with benign web traffic, a horizontal port scan, retransmissions, and IP fragments.
 
 ---
 
-## 3. Evaluation protocol
+## Evaluation methodology
 
-The split is **grouped by capture day**. Every test day is strictly later than
-every train and validation day, and the test attack families appear in neither:
+The evaluation uses capture-day groups to separate training, validation, and testing. Test days occur later than the training and validation days, and the test set includes attack families withheld from training.
 
-| Split | Days | Attack families |
+| Split | Capture days | Attack families |
 |---|---|---|
-| Train | 14, 15, 21, 22 Feb | FTP brute force, DoS (GoldenEye, Slowloris), DDoS (HOIC, LOIC), web brute force / XSS / SQLi |
-| Validation | 16, 23 Feb | DoS (Hulk, SlowHTTPTest), web attacks |
-| **Test** | 28 Feb, 1, 2 Mar | **Infiltration, Bot — unseen in training** |
+| Training | 14, 15, 21, 22 February | FTP brute force; DoS (GoldenEye, Slowloris); DDoS (HOIC, LOIC); web brute force, XSS, SQL injection |
+| Validation | 16 and 23 February | DoS (Hulk, SlowHTTPTest) and web attacks |
+| Test | 28 February, 1 and 2 March | Infiltration and Bot — not present in training |
 
-Validation deliberately holds out a day with volumetric attacks. Built only from
-the web-attack days, validation carries a few hundred hostile flows in 600k and
-has almost no signal at 10 s granularity — early stopping then degenerates into
-picking an undertrained epoch, which is exactly what happened in an earlier run.
+Validation is intentionally separated from the test days. The project notes that validation built mainly from web-attack days contains relatively few hostile flows at a 10-second resolution, which can make early stopping unreliable if the split is not chosen carefully.
 
-Rules enforced in `training/train.py`:
+The training pipeline applies these safeguards:
 
-- The scaler is fit on **training data only**.
-- Alert thresholds are chosen on the **validation split**, never on test.
-- Model selection (early stopping) uses **validation AUPRC**, not test.
-- The test split is scored once, and every number in the dashboard is read from
-  `models/benchmark_results.json`. **No metric is hardcoded anywhere.**
+- The feature scaler is fitted using training data only.
+- Alert thresholds are selected on validation data, not test data.
+- Early stopping and model selection use validation AUPRC.
+- The test set is evaluated once; reported dashboard metrics are loaded from `models/benchmark_results.json` rather than hardcoded.
 
-### Three tasks are reported
+### Tasks measured
 
-1. **`t+1` detection** — is the next window hostile? (what a classic IDS does)
-2. **`K`-horizon forecast** — is any of the next 60 s hostile?
-3. **Early warning** — the honest forecasting test. Restricted to *onset*
-   sequences: **no attack anywhere in the observed history**, but an attack
-   appears inside the forecast horizon. An already-visible attack cannot score
-   here, so persistence is excluded and only genuine prediction counts.
-   Lead time is `(index of first future attack window + 1) × 10 s`, bounded above
-   by the 60 s horizon.
+1. **Next-window detection (`t+1`):** determines whether the immediately following window is hostile.
+2. **60-second horizon forecast (`K` steps):** predicts whether any window in the next 60 seconds will contain hostile activity.
+3. **Early warning:** evaluates only sequences with no attack in the observed history but with an attack appearing during the forecast horizon. This excludes cases where an attack is already underway. Lead time is calculated as `(first future attack window index + 1) × 10 seconds`, up to the 60-second horizon.
 
-A **trivial "always alert" predictor** is reported alongside the models. On a test
-split with a 38% positive rate it already scores F1 ≈ 0.55, so any model not
-clearly above it is not doing useful work. Reporting it makes that impossible to
-hide behind a headline F1.
+An always-alert predictor is included as a simple reference point. Because the test set has a substantial positive rate, this baseline can achieve a seemingly respectable F1 score without useful discrimination. Comparing against it helps put the learned models' results in context.
 
-### Results (test split: 28 Feb, 1 Mar, 2 Mar — Infiltration + Bot)
+### Reported test results
 
-All models held to the **same 5% validation false-alarm budget**, so the comparison
-measures discrimination rather than how well each model's threshold happens to
-transfer across attack families. 9918 test sequences, positive rate 0.3804.
+The table below reproduces the results recorded in the project's benchmark output for the test dates listed above (Infiltration and Bot). All models use the same 5% validation false-alarm budget. The reported test set contains 9,918 sequences, with a positive rate of 0.3804.
 
-| Model | F1 | Precision | Recall | FPR | AUPRC | AUROC | EW recall | EW lead (s) |
-|---|---|---|---|---|---|---|---|---|
-| Always-alert (trivial reference) | 0.5512 | 0.3804 | 1.0000 | 1.0000 | 0.3804 | 0.5000 | 1.00 | 35.0 |
-| Logistic Regression (static S_t) | 0.3116 | 0.6807 | 0.2020 | 0.0582 | 0.6175 | 0.7227 | 0.10 | 50.0 |
-| Vanilla LSTM classifier | 0.4874 | 0.6251 | 0.3995 | 0.1471 | 0.6465 | 0.7670 | 0.47 | 37.9 |
-| Temporal World Model (K-step rollout) | 0.4954 | 0.8117 | 0.3565 | 0.0508 | 0.6931 | 0.7694 | 0.10 | 50.0 |
+| Model | F1 | Precision | Recall | FPR | AUPRC | AUROC | Early-warning recall | Mean lead (s) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Always-alert reference | 0.5512 | 0.3804 | 1.0000 | 1.0000 | 0.3804 | 0.5000 | 1.00 | 35.0 |
+| Logistic regression (static state) | 0.3116 | 0.6807 | 0.2020 | 0.0582 | 0.6175 | 0.7227 | 0.10 | 50.0 |
+| LSTM classifier | 0.4874 | 0.6251 | 0.3995 | 0.1471 | 0.6465 | 0.7670 | 0.47 | 37.9 |
+| Temporal world model (multi-step rollout) | 0.4954 | 0.8117 | 0.3565 | 0.0508 | 0.6931 | 0.7694 | 0.10 | 50.0 |
 
-Read this table as follows.
+**How to interpret these results**
 
-- **The trivial row is the floor.** "Always alert" scores F1 0.55 on its own
-  because 38% of test windows are hostile. A high F1 alone proves nothing here.
-- **AUPRC and AUROC are the threshold-free measures.** The world model leads both
-  (AUPRC 0.693 vs 0.647 for the LSTM and 0.618 for logistic regression), i.e. it
-  ranks hostile windows better than either baseline.
-- **At an equal false-alarm budget the world model has by far the best
-  precision** (0.81 vs 0.63) and is the only learned model that actually stays
-  inside the 5% budget on test — the LSTM overshoots to 14.7%. For a SOC, that
-  difference is the difference between a usable alert queue and an ignored one.
-- **The LSTM still wins early-warning recall** (0.47 vs 0.10), at roughly triple
-  the false-alarm rate. This is an honest weakness, not a rounding artifact: the
-  world model is calibrated conservatively and misses onsets the LSTM catches.
-  Note the early-warning sample is only 30 onset sequences, so both figures carry
-  wide error bars.
+- The always-alert baseline has an F1 of 0.5512 because 38% of test sequences are positive; F1 alone is therefore not enough to demonstrate forecasting quality.
+- The temporal model has the highest AUPRC (0.6931) and AUROC (0.7694) among the learned models in this reported run.
+- Its precision is 0.8117, and its test false-positive rate is 0.0508. The LSTM classifier has higher early-warning recall (0.47 compared with 0.10), but also a higher false-positive rate.
+- The early-warning subset contains only 30 onset sequences, so those recall and lead-time estimates are uncertain and should be treated cautiously.
 
-Numbers regenerate with `python training/train.py`; they are read from
-`models/benchmark_results.json` and are not hardcoded anywhere.
+To regenerate the reported evaluation, run the training command and inspect `models/benchmark_results.json`. Results can vary if the data, environment, or implementation changes.
 
 ---
 
-## 4. Network state vector (42 dimensions)
+## Network-state representation
 
-All 42 dimensions are computed from data; none are placeholders.
+Each 10-second window is represented by 42 computed features.
 
-**Flow-level (NetFlow/IPFIX-style)** — flow count; forward/backward packet and
-byte totals; flow duration mean and standard deviation; bytes/s and packets/s;
-per-window SYN, ACK, RST, FIN, PSH, URG counts; SYN:ACK ratio; flow IAT mean,
-std and max; forward and backward IAT means; forward and backward packets/s;
-subflow packet and byte counts; down/up ratio; protocol mix (TCP and UDP shares).
+**Flow-level features** include flow counts; forward and backward packet and byte totals; average and standard deviation of flow duration; byte and packet rates; TCP SYN, ACK, RST, FIN, PSH, and URG counts; SYN-to-ACK ratio; flow inter-arrival-time statistics; forward/backward inter-arrival times and packet rates; subflow packet and byte totals; down/up ratio; and TCP/UDP protocol proportions.
 
-**Packet-level (PCAP-derived / CICFlowMeter packet statistics)** — TCP initial
-window size (forward and backward); minimum forward segment size; payload size
-distribution (mean, std, variance, average packet size); active and idle times;
-**destination-port Shannon entropy** and **unique destination-port count** — the
-horizontal port-scan signature; a silent-window flag.
+**Packet-level features** include initial TCP window sizes in both directions, minimum forward segment size, payload-size statistics, average packet size, active and idle durations, destination-port Shannon entropy, number of unique destination ports, and a silent-window indicator.
 
-When ingesting a PCAP directly, `src/pcap_ingest.py` additionally measures TTL
-mean and variance, IP fragmentation counts, and TCP retransmissions, which the
-CSVs do not expose.
+When PCAP files are processed directly, `src/pcap_ingest.py` additionally extracts TTL mean and variance, IP-fragment counts, and TCP retransmission information. These attributes are not available in the same form in the CSV input.
 
 ---
 
-## 5. Architecture
+## Model design
 
+The processing path is:
+
+```text
+Traffic flows
+    |
+    v
+State builder --> 12-window history --> LSTM encoder --> latent state z_t
+                                                        |
+                                                        v
+                                      Transition module, repeated 6 times
+                                                        |
+                                                        v
+                                  Future latent states z_(t+1) ... z_(t+6)
+                                                        |
+                           +----------------------------+-------------------+
+                           |                            |                   |
+                           v                            v                   v
+                    State decoder                  Risk head         ATT&CK head
+                 Predicted network state       Attack probability   7-way tactic
 ```
-flows ──► StateBuilder ──► S_{t-11..t} ──► LSTM Encoder ──► z_t
-                                                             │
-                              ┌──────────────────────────────┘
-                              ▼
-                        Transition T(·)  ──►  z_{t+1} ──► T(·) ──► z_{t+2} ··· z_{t+6}
-                              │                  │                      │
-                              └──────────────────┴──────────────────────┘
-                                                 ▼
-                              ┌──────────────────┼──────────────────┐
-                              ▼                  ▼                  ▼
-                       State decoder       Risk head          ATT&CK stage head
-                        Ŝ_{t+k}           P(attack)          7-way tactic
-```
 
-- **Encoder** — 2-layer LSTM (hidden 64) → `tanh` latent, dim 32.
-- **Transition** — residual MLP `z + f(z)` with LayerNorm; the residual form keeps
-  the 6-step rollout numerically stable.
-- **Heads** — state decoder (MSE), risk (BCE-with-logits, class-weighted), ATT&CK
-  stage (cross-entropy over 7 tactics).
-- **Loss** — `L = α·L_state + β·L_risk + γ·L_stage` with `α=1, β=2, γ=1`.
+The main components are:
 
-~73k parameters. Small by design: the test is whether *learned dynamics* beat a
-classifier, not whether a bigger network wins.
+- **Encoder:** two-layer LSTM with hidden size 64, producing a 32-dimensional latent representation through `tanh`.
+- **Transition module:** residual MLP of the form `z + f(z)`, followed by LayerNorm. The residual connection is intended to help stabilize the six-step rollout.
+- **Prediction heads:** a state decoder trained with mean squared error, a risk head trained with class-weighted binary cross-entropy, and a seven-class ATT&CK tactic head trained with cross-entropy.
+- **Combined loss:** `L = α·L_state + β·L_risk + γ·L_stage`, with `α = 1`, `β = 2`, and `γ = 1`.
 
-### Why signed-log scaling matters
+The network has approximately 73,000 parameters. The emphasis is on testing whether learned temporal dynamics add value beyond a static classifier, rather than increasing model size.
 
-Flow telemetry is heavy-tailed — `Flow Duration` and byte counters span ~8 orders
-of magnitude. A plain `StandardScaler` leaves 99% of windows squashed near zero
-with a few 100-σ outliers, which saturates the LSTM and collapses the risk head to
-the majority class. `src/scaling.py` applies `sign(x)·log1p(|x|)` before
-standardising.
+### Feature scaling
+
+Network-flow measurements are heavy-tailed: values such as flow duration and byte counts can span several orders of magnitude. Standardizing raw values alone can leave most observations compressed near zero while extreme values dominate.
+
+To reduce this effect, `src/scaling.py` applies the signed-log transform `sign(x) · log1p(|x|)` before standardization.
 
 ---
 
-## 6. Repository layout
+## Project structure
 
-```
-trinetra-world-model/
-├── app.py                      # Streamlit defender dashboard (CSV + PCAP upload)
+```text
+AI-Based-Network-Attack-Forecasting/
+├── app.py
 ├── requirements.txt
-├── ARCHITECTURE.md             # 2-page architecture document
+├── ARCHITECTURE.md
 ├── configs/
-│   ├── config.yaml             # windowing, model and loss hyperparameters
-│   └── attack_mapping.yaml     # dataset label -> MITRE ATT&CK tactic + stage index
+│   ├── config.yaml
+│   └── attack_mapping.yaml
 ├── src/
-│   ├── preprocessing.py        # ingest, 12-hour clock repair, NaN/Inf handling
-│   ├── state_builder.py        # 42-D windowed state vectors + sequence tensors
-│   ├── scaling.py              # signed-log1p standardisation
-│   ├── world_model.py          # encoder / transition / decoder / risk / stage heads
-│   ├── attack_mapping.py       # ATT&CK mapping engine
-│   ├── explainability.py       # Integrated Gradients attribution
-│   └── pcap_ingest.py          # scapy PCAP -> flow records (+ TTL, retrans, frags)
+│   ├── preprocessing.py
+│   ├── state_builder.py
+│   ├── scaling.py
+│   ├── world_model.py
+│   ├── attack_mapping.py
+│   ├── explainability.py
+│   └── pcap_ingest.py
 ├── training/
-│   └── train.py                # training + benchmark, writes benchmark_results.json
+│   └── train.py
 └── models/
-    ├── world_model.pt          # weights + scaler state + selected threshold
-    ├── benchmark_results.json  # every reported metric
-    └── train_log.txt           # full training console log
+    ├── world_model.pt
+    ├── benchmark_results.json
+    └── train_log.txt
 ```
 
----
-
-## 7. Two data-quality issues worth knowing about
-
-Both are handled in `src/preprocessing.py`, and both silently corrupt results if
-left unfixed:
-
-1. **CIC-IDS2018 timestamps use a 12-hour clock with no AM/PM marker.** Parsed
-   naively, `01:48:53` (1:48 PM) becomes 1:48 AM, and sorting places the afternoon
-   *before* the morning — so a model trained on it learns dynamics across a
-   timeline that jumps 5 PM → 8 AM mid-sequence. Hours below 8 are shifted by +12
-   (captures run ~08:00–17:30), guarded so the shift only applies when the file
-   genuinely looks 12-hour.
-2. **A handful of rows carry epoch-zero (1970) timestamps.** At 10 s resolution a
-   single one stretches the resample span across ~48 years, producing ~10⁸ empty
-   buckets and exhausting memory. Rows more than 2 days from the median timestamp
-   are dropped; `StateBuilder` also raises a clear error above `MAX_WINDOWS`.
+The main areas are `src/` for preprocessing and model components, `training/` for model fitting and evaluation, `configs/` for settings and attack mappings, and `models/` for saved weights and benchmark artifacts.
 
 ---
 
-## 8. Limitations
+## Data-quality handling
 
-- Windows are labelled hostile if **any** flow in them is hostile, so a window
-  mixing benign and attack traffic is scored entirely as attack.
-- Attack episodes in IDS2018 run for hours, so the `t+1` and `K`-horizon tasks are
-  dominated by persistence. The **early-warning** metric exists precisely because
-  those two numbers overstate forecasting ability; read it first.
-- Lead time is capped at the 60 s horizon by construction. It is not a claim about
-  arbitrary-horizon prediction.
-- Source IP/destination IP are dropped so the model cannot memorise host
-  signatures; this also means it cannot use host reputation.
-- Single dataset. Generalisation is tested across *unseen attack families* within
-  IDS2018, not across networks.
-- **The ATT&CK stage head is the weakest component and should be presented as
-  such.** It can only emit tactics it saw in training, and Infiltration and Bot
-  are absent from the training days, so test-split stage accuracy is 0 by
-  construction. Even on validation, where the tactics *were* seen, accuracy is
-  only 0.053 — inverse-frequency class weighting lifted it off zero but did not
-  make it good. Treat the stage output as an experimental signal, not a claim.
-- Only the first 600k rows of each CSV are read. That spans a full capture day but
-  not every flow within it.
+The preprocessing pipeline addresses two issues noted in the source project:
+
+1. **Timestamps without AM/PM markers:** Some CIC-IDS2018 timestamps use a 12-hour clock without an AM/PM indicator. If interpreted as 24-hour timestamps without correction, afternoon traffic may be placed before morning traffic. The preprocessing code shifts hours below 8 by 12 when the file appears to follow this timestamp pattern.
+2. **Epoch-zero timestamps:** A small number of rows may contain timestamps from 1970. At 10-second resolution, these can create an enormous number of empty time windows and consume excessive memory. Rows more than two days from the median timestamp are removed, and the state builder checks for an excessive number of windows.
+
+These checks are important because incorrect time ordering or invalid timestamps can distort the temporal sequences used for forecasting.
+
+---
+
+## Limitations and considerations
+
+- A time window is labelled hostile if at least one flow in it is hostile. Mixed benign/attack windows are therefore labelled entirely as attack.
+- Attacks in IDS2018 can last for hours, so next-window and multi-step metrics may reflect attack persistence rather than early prediction. The early-warning metric is intended to isolate the more difficult onset-prediction setting.
+- Forecast lead time is limited to 60 seconds by design; the results do not establish prediction at longer horizons.
+- Source and destination IP addresses are excluded to reduce memorization of specific hosts. As a consequence, host reputation is not used.
+- Evaluation is based on a single dataset. The test split assesses generalization to attack families withheld during training, not generalization to entirely different networks.
+- **ATT&CK stage prediction is experimental.** The model can only predict tactics represented during training. Since Infiltration and Bot are absent from the training days, test-split stage accuracy is zero by construction. The source project also reports low validation accuracy (0.053), so this output should not be treated as a reliable classification result.
+- The training script reads at most the first 600,000 rows from each CSV, so not every flow in every capture is necessarily included.
+
+---
+
+## Attribution
+
+This repository adapts the implementation and technical approach documented in the [upstream project repository](https://github.com/Nikethan10/trinetra-sih2026-ps26153). The README has been reorganized for this project; implementation details and benchmark values should be treated as inherited from the upstream work unless independently changed and verified.
+
+Before redistributing, review the upstream license and preserve any required copyright, license, and attribution notices.
