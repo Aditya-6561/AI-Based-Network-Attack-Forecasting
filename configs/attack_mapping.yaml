@@ -1,0 +1,113 @@
+# ATT&CK-Informed Behavioral Mapping Configuration
+
+mappings:
+  Benign:
+    tactic: "None"
+    tactic_id: "TA0000"
+    stage_index: 0
+    description: "Normal network traffic"
+
+  # Reconnaissance / Scanning
+  PortScan:
+    tactic: "Reconnaissance"
+    tactic_id: "TA0043"
+    stage_index: 1
+    description: "Active network scanning and port enumeration"
+
+  # Credential Access / Brute Force
+  FTP-BruteForce:
+    tactic: "Credential Access"
+    tactic_id: "TA0006"
+    stage_index: 2
+    description: "Automated password guessing on FTP service"
+    
+  SSH-Bruteforce:
+    tactic: "Credential Access"
+    tactic_id: "TA0006"
+    stage_index: 2
+    description: "Automated password guessing on SSH service"
+
+  Brute Force -Web:
+    tactic: "Credential Access"
+    tactic_id: "TA0006"
+    stage_index: 2
+    description: "Web authentication brute force"
+
+  Brute Force -XSS:
+    tactic: "Credential Access"
+    tactic_id: "TA0006"
+    stage_index: 2
+    description: "Cross-site scripting authentication bypass attempt"
+
+  # Initial Access / Web Exploitation
+  SQL Injection:
+    tactic: "Initial Access"
+    tactic_id: "TA0001"
+    stage_index: 3
+    description: "Exploitation of web application database interface"
+
+  # Impact / Service Disruption
+  DoS attacks-GoldenEye:
+    tactic: "Impact"
+    tactic_id: "TA0040"
+    stage_index: 4
+    description: "HTTP DoS attack exhausting HTTP keep-alive sockets"
+
+  DoS attacks-Slowloris:
+    tactic: "Impact"
+    tactic_id: "TA0040"
+    stage_index: 4
+    description: "Slow HTTP header request DoS attack"
+
+  DoS attacks-SlowHTTPTest:
+    tactic: "Impact"
+    tactic_id: "TA0040"
+    stage_index: 4
+    description: "Slow HTTP request body/header denial of service"
+
+  DoS attacks-Hulk:
+    tactic: "Impact"
+    tactic_id: "TA0040"
+    stage_index: 4
+    description: "High-volume HTTP flood denial of service"
+
+  DDOS attack-HOIC:
+    tactic: "Impact"
+    tactic_id: "TA0040"
+    stage_index: 4
+    description: "Distributed High Orbit Ion Cannon HTTP flood"
+
+  DDOS attack-LOIC-HTTP:
+    tactic: "Impact"
+    tactic_id: "TA0040"
+    stage_index: 4
+    description: "Distributed Low Orbit Ion Cannon HTTP flood"
+
+  DDoS attacks-LOIC-HTTP:
+    tactic: "Impact"
+    tactic_id: "TA0040"
+    stage_index: 4
+    description: "Distributed Low Orbit Ion Cannon HTTP flood"
+
+  # Lateral Movement / Execution
+  Infilteration:
+    tactic: "Lateral Movement"
+    tactic_id: "TA0008"
+    stage_index: 5
+    description: "Internal compromise expansion and host-to-host pivoting"
+
+  # Command and Control
+  Bot:
+    tactic: "Command and Control"
+    tactic_id: "TA0011"
+    stage_index: 6
+    description: "C2 channel communication with external bot master"
+
+stage_names:
+  0: "Benign"
+  1: "Reconnaissance (TA0043)"
+  2: "Credential Access (TA0006)"
+  3: "Initial Access (TA0001)"
+  4: "Impact (TA0040)"
+  5: "Lateral Movement (TA0008)"
+  6: "Command and Control (TA0011)"

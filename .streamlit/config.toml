@@ -1,0 +1,10 @@
+# Full IDS2018 CICFlowMeter CSVs are 200-380 MB each, well past Streamlit's
+# 200 MB default upload cap. Raised so a reviewer can drop a whole capture day in.
+# Uploads are buffered in memory, so for local files prefer TRINETRA_DATA_DIR
+# (see README) -- that path streams from disk and has no size limit at all.
+[server]
+maxUploadSize = 1024
+maxMessageSize = 1024
+
+[browser]
+gatherUsageStats = false

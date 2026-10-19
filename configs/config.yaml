@@ -1,0 +1,56 @@
+# TRINETRA -- reproducible training configuration.
+# These values mirror the defaults in training/train.py; CLI flags override them.
+
+dataset:
+  # Set the TRINETRA_DATA_DIR environment variable, or pass --data-dir.
+  raw_dir: "${TRINETRA_DATA_DIR}"
+  rows_per_file: 600000     # ~one full capture day per CSV
+  split: chronological      # by capture day; see README section 3
+  train_days: ["14-02", "15-02", "16-02", "21-02"]
+  val_days:   ["22-02", "23-02"]
+  test_days:  ["28-02", "01-03", "02-03"]   # Infiltration + Bot, unseen in training
+
+state_building:
+  window_duration_sec: 10
+  history_steps: 12         # W = 12 windows = 120 s of observed context
+  forecast_steps: 6         # K = 6 windows = 60 s forecast horizon
+  stride: 1                 # sliding step in windows between consecutive sequences
+  state_dim: 42
+
+preprocessing:
+  anonymize_ips: true       # drop Src/Dst IP so hosts cannot be memorised
+  fix_12h_clock: true       # IDS2018 timestamps are 12-hour with no AM/PM marker
+  off_capture_tolerance_days: 2      # drops the stray 1970-epoch rows
+  scaling: signed_log1p_standardise  # see src/scaling.py
+
+model:
+  latent_dim: 32
+  hidden_dim: 64
+  num_encoder_layers: 2
+  dropout: 0.1
+  num_stages: 7             # matches configs/attack_mapping.yaml
+  transition: residual      # z_{t+1} = z_t + f(z_t)
+
+training:
+  learning_rate: 0.001
+  batch_size: 128
+  epochs: 30
+  seed: 1337
+  grad_clip_norm: 1.0
+  model_selection: val_auprc      # early stopping metric
+  risk_class_weighting: auto      # pos_weight = neg/pos on the training split
+
+loss_weights:
+  alpha_state: 1.0          # predicted-state reconstruction (MSE)
+  beta_risk: 2.0            # future attack probability (BCE with logits)
+  gamma_stage: 1.0          # ATT&CK stage (cross-entropy)
+
+evaluation:
+  threshold_selection: validation_split   # never fitted on test
+  report:
+    - next_window           # t+1 detection
+    - k_horizon             # attack anywhere in the next 60 s
+    - early_warning         # onset-only: benign history -> attack in horizon
+  baselines:
+    - logistic_regression   # static snapshot S_t
+    - vanilla_lstm          # sequence classifier, no latent transition
